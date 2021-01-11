@@ -20,7 +20,7 @@
         <param name="vy" value="0"/>
         <param name="vy" value="0"/>
         <param name="vyaw" value="0"/>
-        <param name="duration" value="0.1"/>
+        <param name="duration" value="0.05"/>
         <!-- Polygon of drone -->
         <rosparam param="polygon">[0.2, -0.2, 0.2, 0.2, -0.2, 0.2, -0.2, -0.2]</rosparam>
     </node>

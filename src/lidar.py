@@ -19,6 +19,7 @@ class Lidar:
     def __init__(self):
         self.odom = None
         self.map = None
+        self.scan_buffer = None
         self.pointclouds = None
 
     def setup(self):
@@ -54,6 +55,7 @@ class Lidar:
         # Process map
         if not self.ProcessMap():
             return False
+        self.GenerateScanBuffer()
 
         # TF
         self.tfBuffer = tf2_ros.Buffer()
@@ -64,7 +66,7 @@ class Lidar:
     def spin(self):
         rate = rospy.Rate(self.rate)
         while not rospy.is_shutdown():
-            self.scan()
+            self.ScanMap()
             self.PublishPointCloud2()
             
             # Sleep and wait for callback
@@ -73,8 +75,7 @@ class Lidar:
     def OdometryCallback(self, msg):
         self.odom = msg
     
-    def scan(self):
-        self.pointclouds = None
+    def ScanMap(self):
         if self.odom is None:
             return
 
@@ -89,59 +90,87 @@ class Lidar:
             return
         
         # Scan
-        pointclouds = []
         yaw = tf.transformations.euler_from_quaternion([poseStamped.pose.orientation.x, poseStamped.pose.orientation.y, 
                                                     poseStamped.pose.orientation.z, poseStamped.pose.orientation.w])[2]
+        R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])      
         T = np.array([poseStamped.pose.position.x, poseStamped.pose.position.y])
+        
+        scan_buffer = (np.matmul(self.scan_buffer, R) + T) / self.resolution
+        scan_buffer = np.int32(np.round(scan_buffer))
+        scan_buffer[:, :, 0] = np.clip(scan_buffer[:, :, 0], 0, self.width - 1)
+        scan_buffer[:, :, 1] = np.clip(scan_buffer[:, :, 1], 0, self.height - 1)
+        pixel_values = self.map[scan_buffer[:, :, 1], scan_buffer[:, :, 0]]
+        mask = pixel_values > 0
+        indices = np.where(mask.any(axis=1), mask.argmax(axis=1), -1)
+
+        pointclouds = []
+        for index, scan_points in zip(indices, scan_buffer):
+            if index == -1:
+                pointcloud = [np.inf, np.inf]
+            else:
+                pointcloud = [scan_points[index, 0], scan_points[index, 1]]
+            pointclouds.append(pointcloud)
+        pointclouds_2d = np.asarray(pointclouds) * self.resolution
+
+        # 2D -> 3D
         height = poseStamped.pose.position.z
-
-        start_angle = yaw + self.min_angle
-        end_angle = yaw + self.max_angle
-        step_angle = self.step_angle
-
         start_height = height + self.min_height
         end_height = height + self.max_height
         step_height = self.step_height
 
+        pointclouds = None
+        for height in np.arange(start_height, end_height, step_height):
+            pointclouds_3d = np.concatenate((pointclouds_2d, height * np.ones((len(pointclouds_2d), 1))), axis=1)
+            if pointclouds is None:
+                pointclouds = pointclouds_3d
+            else:
+                pointclouds = np.vstack((pointclouds, pointclouds_3d))
+
+        self.pointclouds = pointclouds
+
+    def GenerateScanBuffer(self):
+        start_angle = self.min_angle
+        end_angle = self.max_angle
+        step_angle = self.step_angle 
+
         start_range = self.min_range
         end_range = self.max_range
         step_range = self.resolution
-
         xs = np.arange(start_range, end_range, step_range)
         ys = 0.0 * xs
-        ray_points = np.concatenate((xs[:, None], ys[:, None]), axis=-1)
+        scan_points = np.concatenate((xs[:, None], ys[:, None]), axis=-1)
 
+        scan_buffer = []
         for angle in np.arange(start_angle, end_angle, step_angle):
             R = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
-            transformed_ray_points = (np.matmul(ray_points, R.T) + T) / self.resolution
-            transformed_ray_points = np.int32(np.round(transformed_ray_points))
-            mask = np.logical_and(np.logical_and(transformed_ray_points[:, 0] >= 0, transformed_ray_points[:, 0] < self.width), 
-                                np.logical_and(transformed_ray_points[:, 1] >= 0, transformed_ray_points[:, 1] < self.height))
-            transformed_ray_points = transformed_ray_points[mask]
-            pointcloud = [np.inf, np.inf]
-            if len(transformed_ray_points):
-                pixel_values = self.map[transformed_ray_points[:, 1], transformed_ray_points[:, 0]]
-                indices = np.argwhere(pixel_values > 0)
-                if len(indices) > 0:
-                    index = indices[0, 0]
-                    pointcloud = [transformed_ray_points[index, 0], transformed_ray_points[index, 1]]
-
-            for height in np.arange(start_height, end_height, step_height):
-                pointclouds.append(pointcloud + [height])
-            
-        pointclouds = np.asarray(pointclouds)
-        pointclouds[:, :2] = pointclouds[:, :2] * self.resolution
-        self.pointclouds = pointclouds
+            rotated_scan_points = np.matmul(scan_points, R.T)
+            scan_buffer.append(rotated_scan_points)
+        self.scan_buffer = np.asarray(scan_buffer)
 
     def PublishPointCloud2(self):
         if self.pointclouds is None:
             return
 
+        # Transform
+        pointclouds = self.pointclouds
+        if self.publish_frame != self.map_frame:
+            try:
+                transformStamped = self.tfBuffer.lookup_transform(self.publish_frame, self.map_frame, 
+                    time=rospy.Time().now(), timeout=rospy.Duration(1.0 / self.rate))
+            except:
+                # rospy.logerr('Transform failed')
+                return
+            R = tf.transformations.quaternion_matrix([transformStamped.transform.rotation.x, transformStamped.transform.rotation.y, 
+                                                transformStamped.transform.rotation.z, transformStamped.transform.rotation.w])[:3, :3]
+            T = np.array([transformStamped.transform.translation.x, transformStamped.transform.translation.y, transformStamped.transform.translation.z])
+            pointclouds = np.matmul(pointclouds, R.T) + T
+
+        # Publish PointCloud2 topic
         pointCloud2 = PointCloud2()
         pointCloud2.header.stamp = rospy.Time().now()
-        pointCloud2.header.frame_id = self.map_frame
+        pointCloud2.header.frame_id = self.publish_frame
         pointCloud2.height = 1
-        pointCloud2.width = len(self.pointclouds)
+        pointCloud2.width = len(pointclouds)
         pointCloud2.fields = [
             PointField('x', 0, PointField.FLOAT32, 1),
             PointField('y', 4, PointField.FLOAT32, 1),
@@ -149,15 +178,8 @@ class Lidar:
         pointCloud2.is_bigendian = False
         pointCloud2.point_step = 12
         pointCloud2.row_step = pointCloud2.point_step * pointCloud2.width
-        pointCloud2.is_dense = int(np.isfinite(self.pointclouds).all())
-        pointCloud2.data = np.float32(self.pointclouds).tostring()
-
-        try:
-            pointCloud2 = self.tfBuffer.transform(pointCloud2, self.publish_frame, timeout=rospy.Duration(1.0 / self.rate))
-        except:
-            # rospy.logerr('Transform failed')
-            return
-
+        pointCloud2.is_dense = int(np.isfinite(pointclouds).all())
+        pointCloud2.data = np.float32(pointclouds).tostring()
         self.pointcloud2_pub.publish(pointCloud2)
 
     def ProcessMap(self):

@@ -38,7 +38,7 @@ class Drone:
         self.odom_frame = rospy.get_param('~odom_frame', 'odom')
         self.base_frame = rospy.get_param('~base_frame', 'base_link')
         self.duration = rospy.get_param('~duration', 0.1)
-        _polygon = rospy.get_param('~polygon')
+        polygon = rospy.get_param('~polygon')
 
         yaw = deg2rad(yaw)
         quat = tf.transformations.quaternion_from_euler(0.0, 0.0, yaw)
@@ -47,10 +47,10 @@ class Drone:
         self.pose.orientation.z = quat[2]
         self.pose.orientation.w = quat[3]       
 
-        for i in range(len(_polygon) // 2):
+        for i in range(len(polygon) // 2):
             point = Point32()
-            point.x = _polygon[2 * i]
-            point.y = _polygon[2 * i + 1]   
+            point.x = polygon[2 * i]
+            point.y = polygon[2 * i + 1]   
             self.polygon.points.append(point)
 
         # Subscribe velocity topic
