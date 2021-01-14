@@ -6,7 +6,7 @@ namespace robot
     
 bool Car::setup(ros::NodeHandle nh, ros::NodeHandle nh_priv)
 {
-    nav_finish_flag = False;
+    nav_finish_flag = false;
     init_pose = geometry_msgs::Pose2D();
     pose = geometry_msgs::Pose2D();
     velocity = geometry_msgs::Twist();
@@ -82,15 +82,15 @@ void Car::VelCallback(const geometry_msgs::Twist& msg)
         velocity.linear.y = abs(msg.linear.y) > max_vel[1] ? (msg.linear.y > 0 ? max_vel[1] : -max_vel[1]) : msg.linear.y;
         velocity.angular.z = abs(msg.angular.x) > max_vel[2] ? (msg.angular.x > 0 ? max_vel[2] : -max_vel[2]) : msg.angular.x;
 
-        ROS_INFO("velocity: %f, %f, %f", velocity.linear.x, velocity.linear.y, velocity.linear.z)
+        // ROS_INFO("velocity: %f, %f, %f", velocity.linear.x, velocity.linear.y, velocity.linear.z);
     }
 }
 
 void Car::GoalReachedCallback(const std_msgs::Bool& msg)
 {
     if(!nav_finish_flag && msg.data)
-        ROS_INFO("Finishing navigation")
-    nav_finish_flag = msg.data
+        ROS_INFO("Finishing navigation");
+    nav_finish_flag = msg.data;
 }
 
 void Car::update()

@@ -19,7 +19,7 @@
         <param name="vx" value="0"/>
         <param name="vy" value="0"/>
         <param name="vth" value="0"/>
-        <rosparam param="max_vel">[3.0, 3.0, 1.0, 1.0]</rosparam>
+        <rosparam param="max_vel">[3.0, 3.0, 1.0]</rosparam>
         <!-- Polygon of car -->
         <rosparam param="polygon">[0.2, -0.2, 0.2, 0.2, -0.2, 0.2, -0.2, -0.2]</rosparam>
     </node>
@@ -28,7 +28,7 @@
     <node pkg="robot" name="obstacle" type="drone_node.py" output="screen">
         <remap from="cmd_vel" to="obstacle/cmd_vel"/>
         <param name="duration" value="0.05"/>
-        <param name="map_frame" value="map"/>
+        <param name="map_frame" value="$(arg map_frame)"/>
         <param name="odom_frame" value="obstacle/odom"/>
         <param name="base_frame" value="obstacle/base_link"/>
         <!-- Initial pose of drone -->
@@ -48,7 +48,7 @@
 
     ################ keyboardcontrol node ################
     <node pkg="robot" name="keyboardcontrol" type="keyboardcontrol" output="screen">
-        <rosparam param="KP">[1.0, 1.0, 1.0, 0.5]</rosparam>
+        <rosparam param="KP">[2.0, 2.0, 2.0, 0.5]</rosparam>
         <param name="rate" value="10"/>
     </node>
 
