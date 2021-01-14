@@ -71,7 +71,8 @@
         <param name="max_range" value="5.0"/>     
         <param name="min_height" value="0"/>
         <param name="max_height" value="4"/>
-        <param name="step_height" value="0.2"/>     
+        <param name="step_height" value="0.2"/>
+        <param name="height_mode" value="0"/>        
     </node>
 
     ################ rviz node ################

@@ -38,7 +38,8 @@ class Lidar:
         self.max_range = rospy.get_param('~max_range', 10.0) 
         self.min_height = rospy.get_param('~min_height', 0.0) 
         self.max_height = rospy.get_param('~max_height', 4.0)  
-        self.step_height = rospy.get_param('~step_height', 0.2)                 
+        self.step_height = rospy.get_param('~step_height', 0.2) 
+        self.height_mode = rospy.get_param('~height_mode', 0) 
         self.min_angle = deg2rad(self.min_angle)
         self.max_angle = deg2rad(self.max_angle)
         self.step_angle = deg2rad(self.step_angle)
@@ -97,20 +98,7 @@ class Lidar:
         if dist < self.min_range or dist > self.max_range:
             self.obstacle_pointclouds = None
             return
-        pointclouds_2d = np.array([[x, y]])
-
-        # 2D -> 3D
-        start_height = self.min_height
-        end_height = self.max_height
-        step_height = self.step_height
-
-        pointclouds = None
-        for height in np.arange(start_height, end_height, step_height):
-            pointclouds_3d = np.concatenate((pointclouds_2d, height * np.ones((len(pointclouds_2d), 1))), axis=1)
-            if pointclouds is None:
-                pointclouds = pointclouds_3d
-            else:
-                pointclouds = np.vstack((pointclouds, pointclouds_3d))
+        pointclouds = np.array([[x, y, 0.0]])
 
         self.obstacle_pointclouds = pointclouds
 
@@ -145,24 +133,11 @@ class Lidar:
         pointclouds = []
         for index, scan_points in zip(indices, scan_buffer):
             if index == -1:
-                pointcloud = [np.inf, np.inf]
+                pointcloud = [np.inf, np.inf, np.inf]
             else:
-                pointcloud = [scan_points[index, 0], scan_points[index, 1]]
+                pointcloud = [scan_points[index, 0], scan_points[index, 1], 0.0]
             pointclouds.append(pointcloud)
-        pointclouds_2d = np.asarray(pointclouds) * self.resolution
-
-        # 2D -> 3D
-        start_height = self.min_height
-        end_height = self.max_height
-        step_height = self.step_height
-
-        pointclouds = None
-        for height in np.arange(start_height, end_height, step_height):
-            pointclouds_3d = np.concatenate((pointclouds_2d, height * np.ones((len(pointclouds_2d), 1))), axis=1)
-            if pointclouds is None:
-                pointclouds = pointclouds_3d
-            else:
-                pointclouds = np.vstack((pointclouds, pointclouds_3d))
+        pointclouds = np.asarray(pointclouds) * self.resolution
 
         self.map_pointclouds = pointclouds
 
@@ -230,15 +205,30 @@ class Lidar:
                                 rospy.Duration(1.0 / self.rate))
 
         # Publish PointCloud2 topic
-        pointclouds = None
+        pointclouds_2d = None
         if map_pointclouds is not None and obstacle_pointclouds is None:
-            pointclouds = map_pointclouds
+            pointclouds_2d = map_pointclouds
         elif map_pointclouds is None and obstacle_pointclouds is not None:
-            pointclouds = obstacle_pointclouds
+            pointclouds_2d = obstacle_pointclouds
         elif map_pointclouds is not None and obstacle_pointclouds is not None:
-            pointclouds = np.vstack((map_pointclouds, obstacle_pointclouds))
+            pointclouds_2d = np.vstack((map_pointclouds, obstacle_pointclouds))
         else:
             return
+
+        # Transform: 2D -> 3D
+        height = 0.0 if self.height_mode else self.odom.pose.pose.position.z
+        start_height = self.min_height - height
+        end_height = self.max_height - height
+        step_height = self.step_height
+
+        pointclouds = None
+        for height in np.arange(start_height, end_height, step_height):
+            pointclouds_3d = pointclouds_2d.copy()
+            pointclouds_3d[:, 2] = height
+            if pointclouds is None:
+                pointclouds = pointclouds_3d
+            else:
+                pointclouds = np.vstack((pointclouds, pointclouds_3d))
 
         pointCloud2 = self.GeneratePointCloud2(pointclouds, self.publish_frame)
         self.pointcloud2_pub.publish(pointCloud2)
