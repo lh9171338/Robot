@@ -20,7 +20,8 @@ class Lidar:
         self.odom = None
         self.map = None
         self.scan_buffer = None
-        self.pointclouds = None
+        self.obstacle_pointclouds = None
+        self.map_pointclouds = None
 
     def setup(self):
         # Parameter
@@ -47,7 +48,8 @@ class Lidar:
             return False
 
         # Subscribe odometry topic
-        rospy.Subscriber('odom', Odometry, self.OdometryCallback, queue_size=10)
+        rospy.Subscriber('self/odom', Odometry, self.OdometryCallback, queue_size=10)
+        rospy.Subscriber('obstacle/odom', Odometry, self.ObstacleCallback, queue_size=10)
 
         # Advertise odometry topic
         self.pointcloud2_pub = rospy.Publisher('~pointcloud', PointCloud2, queue_size=10)
@@ -75,6 +77,43 @@ class Lidar:
     def OdometryCallback(self, msg):
         self.odom = msg
     
+    def ObstacleCallback(self, msg):
+        if self.odom is None:
+            return
+
+        # Transform
+        poseStamped = PoseStamped()
+        poseStamped.header = msg.header
+        poseStamped.pose = msg.pose.pose
+        try:
+            poseStamped = self.tfBuffer.transform(poseStamped, self.odom_frame, timeout=rospy.Duration(1.0 / self.rate))
+        except:
+            # rospy.logerr('Transform failed')
+            return
+
+        x, y = poseStamped.pose.position.x, poseStamped.pose.position.y
+        dx, dy = x - self.odom.pose.pose.position.x, y - self.odom.pose.pose.position.y
+        dist = np.sqrt(dx ** 2 + dy ** 2)
+        if dist < self.min_range or dist > self.max_range:
+            self.obstacle_pointclouds = None
+            return
+        pointclouds_2d = np.array([[x, y]])
+
+        # 2D -> 3D
+        start_height = self.min_height
+        end_height = self.max_height
+        step_height = self.step_height
+
+        pointclouds = None
+        for height in np.arange(start_height, end_height, step_height):
+            pointclouds_3d = np.concatenate((pointclouds_2d, height * np.ones((len(pointclouds_2d), 1))), axis=1)
+            if pointclouds is None:
+                pointclouds = pointclouds_3d
+            else:
+                pointclouds = np.vstack((pointclouds, pointclouds_3d))
+
+        self.obstacle_pointclouds = pointclouds
+
     def ScanMap(self):
         if self.odom is None:
             return
@@ -113,9 +152,8 @@ class Lidar:
         pointclouds_2d = np.asarray(pointclouds) * self.resolution
 
         # 2D -> 3D
-        height = poseStamped.pose.position.z
-        start_height = height + self.min_height
-        end_height = height + self.max_height
+        start_height = self.min_height
+        end_height = self.max_height
         step_height = self.step_height
 
         pointclouds = None
@@ -126,7 +164,7 @@ class Lidar:
             else:
                 pointclouds = np.vstack((pointclouds, pointclouds_3d))
 
-        self.pointclouds = pointclouds
+        self.map_pointclouds = pointclouds
 
     def GenerateScanBuffer(self):
         start_angle = self.min_angle
@@ -147,16 +185,11 @@ class Lidar:
             scan_buffer.append(rotated_scan_points)
         self.scan_buffer = np.asarray(scan_buffer)
 
-    def PublishPointCloud2(self):
-        if self.pointclouds is None:
-            return
-
-        # Transform
-        pointclouds = self.pointclouds
-        if self.publish_frame != self.map_frame:
+    def TransformPointClouds(self, pointclouds, source_frame, target_frame, timeout):
+        if target_frame != source_frame:
             try:
-                transformStamped = self.tfBuffer.lookup_transform(self.publish_frame, self.map_frame, 
-                    time=rospy.Time().now(), timeout=rospy.Duration(1.0 / self.rate))
+                transformStamped = self.tfBuffer.lookup_transform(target_frame, source_frame, 
+                    time=rospy.Time().now(), timeout=timeout)
             except:
                 # rospy.logerr('Transform failed')
                 return
@@ -164,11 +197,12 @@ class Lidar:
                                                 transformStamped.transform.rotation.z, transformStamped.transform.rotation.w])[:3, :3]
             T = np.array([transformStamped.transform.translation.x, transformStamped.transform.translation.y, transformStamped.transform.translation.z])
             pointclouds = np.matmul(pointclouds, R.T) + T
+        return pointclouds
 
-        # Publish PointCloud2 topic
+    def GeneratePointCloud2(self, pointclouds, frame_id):
         pointCloud2 = PointCloud2()
         pointCloud2.header.stamp = rospy.Time().now()
-        pointCloud2.header.frame_id = self.publish_frame
+        pointCloud2.header.frame_id = frame_id
         pointCloud2.height = 1
         pointCloud2.width = len(pointclouds)
         pointCloud2.fields = [
@@ -180,6 +214,33 @@ class Lidar:
         pointCloud2.row_step = pointCloud2.point_step * pointCloud2.width
         pointCloud2.is_dense = int(np.isfinite(pointclouds).all())
         pointCloud2.data = np.float32(pointclouds).tostring()
+        return pointCloud2
+
+    def PublishPointCloud2(self):
+         # Map pointclouds
+        map_pointclouds = self.map_pointclouds
+        if map_pointclouds is not None:
+            map_pointclouds = self.TransformPointClouds(map_pointclouds, self.map_frame, self.publish_frame, 
+                                rospy.Duration(1.0 / self.rate))
+
+        # Obstacle pointclouds
+        obstacle_pointclouds = self.obstacle_pointclouds
+        if obstacle_pointclouds is not None:
+            obstacle_pointclouds = self.TransformPointClouds(obstacle_pointclouds, self.odom_frame, self.publish_frame, 
+                                rospy.Duration(1.0 / self.rate))
+
+        # Publish PointCloud2 topic
+        pointclouds = None
+        if map_pointclouds is not None and obstacle_pointclouds is None:
+            pointclouds = map_pointclouds
+        elif map_pointclouds is None and obstacle_pointclouds is not None:
+            pointclouds = obstacle_pointclouds
+        elif map_pointclouds is not None and obstacle_pointclouds is not None:
+            pointclouds = np.vstack((map_pointclouds, obstacle_pointclouds))
+        else:
+            return
+
+        pointCloud2 = self.GeneratePointCloud2(pointclouds, self.publish_frame)
         self.pointcloud2_pub.publish(pointCloud2)
 
     def ProcessMap(self):

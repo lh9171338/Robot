@@ -18,6 +18,7 @@
 #include <geometry_msgs/Point32.h>
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
+#include <std_msgs/Bool.h>
 #include <tf2_ros/static_transform_broadcaster.h>
 #include <tf2_ros/transform_broadcaster.h>
 
@@ -40,6 +41,7 @@ public:
 
 private:
     void VelCallback(const geometry_msgs::Twist& msg);
+    void GoalReachedCallback(const std_msgs::Bool& msg);
     void update();
     void PublishOdometry();
     void PublishPath();
@@ -49,6 +51,7 @@ private:
 
 private:
     ros::Subscriber vel_sub;
+    ros::Subscriber goalreached_sub;
     ros::Publisher odom_pub;
     ros::Publisher path_pub;
     ros::Publisher polygon_pub;
@@ -59,11 +62,14 @@ private:
     geometry_msgs::Twist velocity;
     geometry_msgs::Polygon polygon;
 
+    vector<double> max_vel;
+
     /* parameter */
     string map_frame;
     string odom_frame;
     string base_frame;
     double duration;
+    bool nav_finish_flag;
 };
 
 }

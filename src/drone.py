@@ -1,4 +1,4 @@
-import math
+import numpy as np
 import rospy
 from geometry_msgs.msg import Pose
 from geometry_msgs.msg import Twist
@@ -9,14 +9,16 @@ from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import Path
+from std_msgs.msg import Bool
 import tf2_ros
 import tf
 
-deg2rad = lambda x: x * math.pi / 180.0
-rad2deg = lambda x: x * 180.0 / math.pi
+deg2rad = lambda x: x * np.pi / 180.0
+rad2deg = lambda x: x * 180.0 / np.pi
 
 class Drone:
     def __init__(self):
+        self.nav_finish_flag = False
         self.init_pose = Pose()
         self.pose = Pose()
         self.velocity = Twist()
@@ -25,23 +27,23 @@ class Drone:
     def setup(self):
 
         # Parameter
+        self.duration = rospy.get_param('~duration', 0.1)
+        self.map_frame = rospy.get_param('~map_frame', 'map')
+        self.odom_frame = rospy.get_param('~odom_frame', 'odom')
+        self.base_frame = rospy.get_param('~base_frame', 'base_link')
         self.init_pose.position.x = rospy.get_param('~x', 0.0)  # Initial pose of drone
         self.init_pose.position.y = rospy.get_param('~y', 0.0)
-        self.init_pose.position.z = rospy.get_param('~z', 0.0) 
+        self.pose.position.z = rospy.get_param('~z', 0.0) 
         yaw = rospy.get_param('~yaw', 0.0) 
         self.velocity.linear.x = rospy.get_param('~vx', 0.0)   # Initial velocity of drone
         self.velocity.linear.y = rospy.get_param('~vy', 0.0)
         self.velocity.linear.z = rospy.get_param('~vz', 0.0)
         self.velocity.angular.z = rospy.get_param('~vyaw', 0.0)
-
-        self.map_frame = rospy.get_param('~map_frame', 'map')
-        self.odom_frame = rospy.get_param('~odom_frame', 'odom')
-        self.base_frame = rospy.get_param('~base_frame', 'base_link')
-        self.duration = rospy.get_param('~duration', 0.1)
+        self.max_vel = rospy.get_param('~max_vel', [1.0, 3.0, 1.0, 1.0])
+        
         polygon = rospy.get_param('~polygon')
-
-        yaw = deg2rad(yaw)
-        quat = tf.transformations.quaternion_from_euler(0.0, 0.0, yaw)
+        
+        quat = tf.transformations.quaternion_from_euler(0.0, 0.0, deg2rad(yaw))
         self.pose.orientation.x = quat[0]
         self.pose.orientation.y = quat[1]
         self.pose.orientation.z = quat[2]
@@ -55,6 +57,7 @@ class Drone:
 
         # Subscribe velocity topic
         rospy.Subscriber('cmd_vel', Twist, self.VelCallback, queue_size=10)
+        rospy.Subscriber('isgoalreached', Bool, self.GoalReachedCallback, queue_size=10)
 
         # Advertise odometry topic
         self.odom_pub = rospy.Publisher('~odom', Odometry, queue_size=10)
@@ -82,7 +85,20 @@ class Drone:
             rospy.sleep(self.duration)
 
     def VelCallback(self, msg):
-        self.velocity = msg
+        if self.nav_finish_flag:
+            self.velocity = Twist()
+        else:
+            self.velocity.linear.x = float(np.clip(msg.linear.x, -self.max_vel[0], self.max_vel[0]))
+            self.velocity.linear.y = float(np.clip(msg.linear.y, -self.max_vel[1], self.max_vel[1]))
+            self.velocity.linear.z = float(np.clip(msg.linear.z, -self.max_vel[2], self.max_vel[2]))
+            self.velocity.angular.z = float(np.clip(msg.angular.z, -self.max_vel[3], self.max_vel[3]))
+
+            # rospy.loginfo('velocity: %f, %f, %f, %f', self.velocity.linear.x, self.velocity.linear.y, self.velocity.linear.z, self.velocity.angular.z)
+
+    def GoalReachedCallback(self, msg):
+        if not self.nav_finish_flag and msg.data:
+            rospy.loginfo('Finishing navigation')
+        self.nav_finish_flag = msg.data
 
     def update(self):
         # Calculate the pose of the drone
@@ -94,11 +110,11 @@ class Drone:
         self.pose.orientation.z, self.pose.orientation.w])[2]
         dt = self.duration
 
-        dx = (vx * math.cos(yaw) - vy * math.sin(yaw)) * dt
-        dy = (vx * math.sin(yaw) + vy * math.cos(yaw)) * dt
+        dx = (vx * np.cos(yaw) - vy * np.sin(yaw)) * dt
+        dy = (vx * np.sin(yaw) + vy * np.cos(yaw)) * dt
         dz = vz * dt
         dyaw = vyaw * dt
-        yaw = (yaw + dyaw) % (2 * math.pi)
+        yaw = (yaw + dyaw) % (2 * np.pi)
         quat = tf.transformations.quaternion_from_euler(0.0, 0.0, yaw)
 
         self.pose.position.x += dx

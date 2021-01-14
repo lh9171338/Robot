@@ -6,23 +6,26 @@ namespace robot
     
 bool Car::setup(ros::NodeHandle nh, ros::NodeHandle nh_priv)
 {
+    nav_finish_flag = False;
     init_pose = geometry_msgs::Pose2D();
     pose = geometry_msgs::Pose2D();
     velocity = geometry_msgs::Twist();
 
     // Parameter
     vector<double> _polygon;
+    nh_priv.param<double>("duration", duration, 0.1);
+    nh_priv.param<string>("map_frame", map_frame, "map");
+    nh_priv.param<string>("odom_frame", odom_frame, "odom");
+    nh_priv.param<string>("base_frame", base_frame, "base_link");
     nh_priv.param<double>("x", init_pose.x, 0);      // Initial pose of car
     nh_priv.param<double>("y", init_pose.y, 0);
     nh_priv.param<double>("theta", pose.theta, 0);
     nh_priv.param<double>("vx", velocity.linear.x, 0); // Initial velocity of car
     nh_priv.param<double>("vy", velocity.linear.y, 0);
     nh_priv.param<double>("vth", velocity.angular.z, 0);
-    nh_priv.param<string>("map_frame", map_frame, "map");
-    nh_priv.param<string>("odom_frame", odom_frame, "odom");
-    nh_priv.param<string>("base_frame", base_frame, "base_link");
-    nh_priv.param<double>("duration", duration, 0.1);
+    nh_priv.getParam("max_vel", max_vel);
     nh_priv.getParam("polygon", _polygon);
+
     pose.theta = DEG2RAD(pose.theta);
     for(int i=0;i<_polygon.size() / 2;i++)
     {
@@ -34,6 +37,7 @@ bool Car::setup(ros::NodeHandle nh, ros::NodeHandle nh_priv)
 
     // Subscribe velocity topic
     vel_sub = nh.subscribe("cmd_vel", 10, &Car::VelCallback, this);
+    goalreached_sub = nh.subscribe("isgoalreached", 10, &Car::GoalReachedCallback, this);
 
     // Advertise odometry topic
     odom_pub = nh_priv.advertise<nav_msgs::Odometry>("odom", 10);
@@ -68,7 +72,25 @@ void Car::spin()
 
 void Car::VelCallback(const geometry_msgs::Twist& msg)
 {
-    velocity = msg;
+    if(nav_finish_flag)
+    {
+        velocity = geometry_msgs::Twist();
+    }
+    else
+    {
+        velocity.linear.x = abs(msg.linear.x) > max_vel[0] ? (msg.linear.x > 0 ? max_vel[0] : -max_vel[0]) : msg.linear.x;
+        velocity.linear.y = abs(msg.linear.y) > max_vel[1] ? (msg.linear.y > 0 ? max_vel[1] : -max_vel[1]) : msg.linear.y;
+        velocity.angular.z = abs(msg.angular.x) > max_vel[2] ? (msg.angular.x > 0 ? max_vel[2] : -max_vel[2]) : msg.angular.x;
+
+        ROS_INFO("velocity: %f, %f, %f", velocity.linear.x, velocity.linear.y, velocity.linear.z)
+    }
+}
+
+void Car::GoalReachedCallback(const std_msgs::Bool& msg)
+{
+    if(!nav_finish_flag && msg.data)
+        ROS_INFO("Finishing navigation")
+    nav_finish_flag = msg.data
 }
 
 void Car::update()
