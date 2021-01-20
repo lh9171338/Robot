@@ -92,10 +92,11 @@ class Lidar:
             # rospy.logerr('Transform failed')
             return
 
-        x, y = poseStamped.pose.position.x, poseStamped.pose.position.y
+        x, y, z = poseStamped.pose.position.x, poseStamped.pose.position.y, poseStamped.pose.position.z
         dx, dy = x - self.odom.pose.pose.position.x, y - self.odom.pose.pose.position.y
+        dz = abs(z - self.odom.pose.pose.position.z)
         dist = np.sqrt(dx ** 2 + dy ** 2)
-        if dist < self.min_range or dist > self.max_range:
+        if dist < self.min_range or dist > self.max_range or dz > 0.5:
             self.obstacle_pointclouds = None
             return
         pointclouds = np.array([[x, y, 0.0]])
@@ -122,7 +123,7 @@ class Lidar:
         R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])      
         T = np.array([poseStamped.pose.position.x, poseStamped.pose.position.y])
         
-        scan_buffer = (np.matmul(self.scan_buffer, R) + T) / self.resolution
+        scan_buffer = (np.matmul(self.scan_buffer, R.T) + T) / self.resolution
         scan_buffer = np.int32(np.round(scan_buffer))
         scan_buffer[:, :, 0] = np.clip(scan_buffer[:, :, 0], 0, self.width - 1)
         scan_buffer[:, :, 1] = np.clip(scan_buffer[:, :, 1], 0, self.height - 1)

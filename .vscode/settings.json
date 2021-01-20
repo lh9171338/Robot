@@ -6,5 +6,6 @@
     "files.associations": {
         "chrono": "cpp",
         "complex": "cpp"
-    }
+    },
+    "ros.distro": "melodic"
 }
