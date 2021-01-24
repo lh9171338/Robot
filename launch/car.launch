@@ -6,7 +6,7 @@
     <arg name="base_frame" default="base_link"/>
 
     ################ car node ################
-    <node pkg="robot" name="car" type="car" output="screen">
+    <node pkg="robot" name="car" type="car_node.py" output="screen">
         <param name="duration" value="0.1"/>
         <param name="map_frame" value="$(arg map_frame)"/>
         <param name="odom_frame" value="$(arg odom_frame)"/>

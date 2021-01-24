@@ -2,7 +2,7 @@
 <launch>
 
     ################ car node ################
-    <node pkg="robot" name="car" type="car" output="screen">
+    <node pkg="robot" name="car" type="car_node.py" output="screen">
         <remap from="cmd_vel" to="car/cmd_vel"/>
         <param name="map_frame" value="map"/>
         <param name="odom_frame" value="car/odom"/>

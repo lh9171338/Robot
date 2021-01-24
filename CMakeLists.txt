@@ -23,8 +23,8 @@ include_directories(
 )
 
 ########### 编译可执行文件
-add_executable(car src/car_node.cpp src/car.cpp)
-target_link_libraries(car ${catkin_LIBRARIES})
+#add_executable(car src/car_node.cpp src/car.cpp)
+#target_link_libraries(car ${catkin_LIBRARIES})
 
 add_executable(keyboardcontrol src/keyboardcontrol.cpp)
 target_link_libraries(keyboardcontrol ${catkin_LIBRARIES})
