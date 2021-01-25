@@ -54,19 +54,35 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz/TF
-      Enabled: false
+      Enabled: true
       Frame Timeout: 15
       Frames:
         All Enabled: true
+        base_link:
+          Value: true
+        map:
+          Value: true
+        obstacle/base_link:
+          Value: true
+        obstacle/odom:
+          Value: true
+        odom:
+          Value: true
       Marker Scale: 1
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
-        {}
+        map:
+          obstacle/odom:
+            obstacle/base_link:
+              {}
+          odom:
+            base_link:
+              {}
       Update Interval: 0
-      Value: false
+      Value: true
     - Class: rviz/Group
       Displays:
         - Angle Tolerance: 0.10000000149011612
@@ -281,16 +297,16 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 17.092580795288086
+      Distance: 27.612258911132812
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
       Focal Point:
-        X: 7.760807514190674
-        Y: 8.823448181152344
-        Z: 1.5027128458023071
+        X: 12.353407859802246
+        Y: 6.204524517059326
+        Z: 1.566680908203125
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
@@ -299,7 +315,7 @@ Visualization Manager:
       Pitch: 1.5697963237762451
       Target Frame: <Fixed Frame>
       Value: Orbit (rviz)
-      Yaw: 3.1604018211364746
+      Yaw: 3.1404054164886475
     Saved: ~
 Window Geometry:
   Displays:

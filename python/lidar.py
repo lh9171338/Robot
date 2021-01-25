@@ -9,6 +9,7 @@ from tf2_geometry_msgs import PoseStamped
 from tf2_sensor_msgs import PointCloud2
 import numpy as np
 import cv2
+from occupancygridparam import OccupancyGridParam
 
 
 deg2rad = lambda x: x * np.pi / 180.0
@@ -16,12 +17,15 @@ rad2deg = lambda x: x * 180.0 / np.pi
 
 
 class Lidar:
+    odom = None
+    occMap = None
+    scan_buffer = None
+    obstacle_pointclouds = None
+    map_pointclouds = None
+    occGridParam = None
+
     def __init__(self):
-        self.odom = None
-        self.map = None
-        self.scan_buffer = None
-        self.obstacle_pointclouds = None
-        self.map_pointclouds = None
+        self.occGridParam = OccupancyGridParam()
 
     def setup(self):
         # Parameter
@@ -40,6 +44,8 @@ class Lidar:
         self.max_height = rospy.get_param('~max_height', 4.0)  
         self.step_height = rospy.get_param('~step_height', 0.2) 
         self.height_mode = rospy.get_param('~height_mode', 0) 
+        self.min_obstacle_height = rospy.get_param('~min_obstacle_height', 0.0) 
+        self.max_obstacle_height = rospy.get_param('~max_obstacle_height', 4.0) 
         self.min_angle = deg2rad(self.min_angle)
         self.max_angle = deg2rad(self.max_angle)
         self.step_angle = deg2rad(self.step_angle)
@@ -94,12 +100,11 @@ class Lidar:
 
         x, y, z = poseStamped.pose.position.x, poseStamped.pose.position.y, poseStamped.pose.position.z
         dx, dy = x - self.odom.pose.pose.position.x, y - self.odom.pose.pose.position.y
-        dz = abs(z - self.odom.pose.pose.position.z)
         dist = np.sqrt(dx ** 2 + dy ** 2)
-        if dist < self.min_range or dist > self.max_range or dz > 0.5:
+        if dist < self.min_range or dist > self.max_range:
             self.obstacle_pointclouds = None
             return
-        pointclouds = np.array([[x, y, 0.0]])
+        pointclouds = np.array([[x, y, z]])
 
         self.obstacle_pointclouds = pointclouds
 
@@ -123,11 +128,12 @@ class Lidar:
         R = np.array([[np.cos(yaw), -np.sin(yaw)], [np.sin(yaw), np.cos(yaw)]])      
         T = np.array([poseStamped.pose.position.x, poseStamped.pose.position.y])
         
-        scan_buffer = (np.matmul(self.scan_buffer, R.T) + T) / self.resolution
+        scan_buffer = (np.matmul(self.scan_buffer, R.T) + T)
+        scan_buffer = self.occGridParam.map2ImageTransform(scan_buffer)
         scan_buffer = np.int32(np.round(scan_buffer))
         scan_buffer[:, :, 0] = np.clip(scan_buffer[:, :, 0], 0, self.width - 1)
         scan_buffer[:, :, 1] = np.clip(scan_buffer[:, :, 1], 0, self.height - 1)
-        pixel_values = self.map[scan_buffer[:, :, 1], scan_buffer[:, :, 0]]
+        pixel_values = self.occMap[scan_buffer[:, :, 1], scan_buffer[:, :, 0]]
         mask = pixel_values > 0
         indices = np.where(mask.any(axis=1), mask.argmax(axis=1), -1)
 
@@ -138,7 +144,8 @@ class Lidar:
             else:
                 pointcloud = [scan_points[index, 0], scan_points[index, 1], 0.0]
             pointclouds.append(pointcloud)
-        pointclouds = np.asarray(pointclouds) * self.resolution
+        pointclouds = np.asarray(pointclouds)
+        pointclouds[:, :2] = self.occGridParam.image2MapTransform(pointclouds[:, :2])
 
         self.map_pointclouds = pointclouds
 
@@ -204,6 +211,9 @@ class Lidar:
         if obstacle_pointclouds is not None:
             obstacle_pointclouds = self.TransformPointClouds(obstacle_pointclouds, self.odom_frame, self.publish_frame, 
                                 rospy.Duration(1.0 / self.rate))
+            if obstacle_pointclouds is not None:
+                mask = np.logical_and(obstacle_pointclouds[:, 2] >= self.min_obstacle_height, obstacle_pointclouds[:, 2] <= self.max_obstacle_height)
+                obstacle_pointclouds = obstacle_pointclouds[mask]
 
         # Publish PointCloud2 topic
         pointclouds_2d = None
@@ -237,16 +247,17 @@ class Lidar:
     def ProcessMap(self):
         # Get map
         rospy.wait_for_service('static_map')
-        occupancyGrid = OccupancyGrid()
+        occGrid = OccupancyGrid()
         try:
             getmap = rospy.ServiceProxy('static_map', GetMap)
-            occupancyGrid = getmap().map
+            occGrid = getmap().map
         except:
             rospy.logerr('Service call failed')
             return False
-        self.resolution = occupancyGrid.info.resolution
-        self.height = occupancyGrid.info.height
-        self.width = occupancyGrid.info.width
-        self.map = np.asarray(occupancyGrid.data).reshape((self.height, self.width))
-        self.map = self.map >= self.occ_thresh
+        self.occGridParam.setOccupancyGridParam(occGrid)
+        self.occMap = self.occGridParam.getMap()
+        self.occMap = self.occMap >= self.occ_thresh
+        self.height, self.width = self.occGridParam.getSize()
+        self.resolution = self.occGridParam.getResolution()
+
         return True
